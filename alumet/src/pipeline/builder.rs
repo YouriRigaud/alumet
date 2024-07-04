@@ -252,12 +252,12 @@ impl PipelineBuilder {
             log::warn!("No metrics have been registered, have you loaded the right plugins?")
         }
         // The pipeline requires at least 1 source and 1 output, otherwise the channels close (and it would be useless anyway).
-        if self.sources.is_empty() && self.autonomous_sources.is_empty() {
-            return Err(PipelineBuildError::Invalid(InvalidReason::NoSource));
-        }
-        if self.outputs.is_empty() {
-            return Err(PipelineBuildError::Invalid(InvalidReason::NoSource));
-        }
+        // if self.sources.is_empty() && self.autonomous_sources.is_empty() {
+        //     return Err(PipelineBuildError::Invalid(InvalidReason::NoSource));
+        // }
+        // if self.outputs.is_empty() {
+        //     return Err(PipelineBuildError::Invalid(InvalidReason::NoSource));
+        // }
 
         // Create the normal runtime, the priority one is initialized on demand.
         let rt_normal: Runtime = self.build_normal_runtime()?;
