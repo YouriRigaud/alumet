@@ -29,7 +29,6 @@ fn main() {
 
     // Specifies the plugins that we want to load.
     let plugins = static_plugins![
-        RaplPlugin,
         CsvPlugin,
         SocketControlPlugin,
         PerfPlugin,
