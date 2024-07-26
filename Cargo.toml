@@ -11,6 +11,7 @@ members = [
     "plugin-influxdb",
     "plugin-nvidia",
     "plugin-oar2",
+    "plugin-oar3",
     "plugin-perf",
     "plugin-rapl",
     "plugin-relay",

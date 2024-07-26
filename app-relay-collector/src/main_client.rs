@@ -17,7 +17,7 @@ fn main() {
     let args = Args::parse();
 
     // Load the relay plugin, and the RAPL one to get some input.
-    let plugins = static_plugins![plugin_relay::client::RelayClientPlugin, plugin_rapl::RaplPlugin];
+    let plugins = static_plugins![plugin_relay::client::RelayClientPlugin, plugin_rapl::RaplPlugin, plugin_oar3::OARPlugin ];
 
     // Build the measurement agent.
     let mut agent = AgentBuilder::new(plugins)
