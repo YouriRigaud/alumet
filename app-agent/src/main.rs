@@ -12,7 +12,6 @@ use alumet::{
 use clap::{Args, Parser, Subcommand};
 use env_logger::Env;
 
-use plugin_csv::CsvPlugin;
 use plugin_perf::PerfPlugin;
 use plugin_rapl::RaplPlugin;
 use plugin_socket_control::SocketControlPlugin;
@@ -30,7 +29,6 @@ fn main() {
     // Specifies the plugins that we want to load.
     let plugins = static_plugins![
         RaplPlugin,
-        CsvPlugin,
         SocketControlPlugin,
         PerfPlugin,
         plugin_influxdb::InfluxDbPlugin
