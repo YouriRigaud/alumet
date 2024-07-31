@@ -1,13 +1,8 @@
 mod command;
 mod socket;
 
-use alumet::{
-    pipeline::runtime::RunningPipeline,
-    plugin::{
-        rust::{deserialize_config, serialize_config, AlumetPlugin},
-        AlumetStart, ConfigTable,
-    },
-};
+use alumet::plugin::rust::{deserialize_config, serialize_config, AlumetPlugin};
+use alumet::plugin::{AlumetPluginStart, AlumetPostStart, ConfigTable};
 use serde::{Deserialize, Serialize};
 use socket::SocketControl;
 
@@ -37,19 +32,16 @@ impl AlumetPlugin for SocketControlPlugin {
 
     fn init(config: ConfigTable) -> anyhow::Result<Box<Self>> {
         let config = deserialize_config(config)?;
-        Ok(Box::new(SocketControlPlugin {
-            config: config,
-            control: None,
-        }))
+        Ok(Box::new(SocketControlPlugin { config, control: None }))
     }
 
-    fn start(&mut self, _alumet: &mut AlumetStart) -> anyhow::Result<()> {
+    fn start(&mut self, _alumet: &mut AlumetPluginStart) -> anyhow::Result<()> {
         Ok(())
     }
 
-    fn post_pipeline_start(&mut self, pipeline: &mut RunningPipeline) -> anyhow::Result<()> {
+    fn post_pipeline_start(&mut self, alumet: &mut AlumetPostStart) -> anyhow::Result<()> {
         // Enable remote control via Unix socket.
-        let control = SocketControl::start_new(pipeline.control_handle(), &self.config.socket_path)?;
+        let control = SocketControl::start_new(alumet.pipeline_control(), &self.config.socket_path)?;
         self.control = Some(control);
         log::info!("SocketControl enabled.");
         Ok(())

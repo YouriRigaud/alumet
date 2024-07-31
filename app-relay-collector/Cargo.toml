@@ -1,6 +1,6 @@
 [package]
 name = "app-relay-collector"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 
 [dependencies]
@@ -29,3 +29,6 @@ path = "src/main_client.rs"
 name = "alumet-relay-server"
 required-features = ["server"]
 path = "src/main_server.rs"
+
+[lints]
+workspace = true

@@ -1,9 +1,10 @@
 use alumet::{
     measurement::{AttributeValue, MeasurementAccumulator, MeasurementPoint, Timestamp},
     metrics::{MetricCreationError, TypedMetricId},
+    pipeline::elements::error::PollError,
     plugin::{
         util::{CounterDiff, CounterDiffUpdate},
-        AlumetStart,
+        AlumetPluginStart,
     },
     resources::{Resource, ResourceConsumer},
     units::{PrefixedUnit, Unit},
@@ -37,8 +38,8 @@ impl K8SProbe {
         counter_tot: CounterDiff,
         counter_sys: CounterDiff,
         counter_usr: CounterDiff,
-    ) -> anyhow::Result<K8SProbe> {
-        return Ok(K8SProbe {
+    ) -> K8SProbe {
+        K8SProbe {
             cgroup_v2_metric_file: metric_file,
             time_tot: counter_tot,
             time_usr: counter_usr,
@@ -46,16 +47,12 @@ impl K8SProbe {
             time_used_tot: metric.time_used_tot,
             time_used_system_mode: metric.time_used_system_mode,
             time_used_user_mode: metric.time_used_user_mode,
-        });
+        }
     }
 }
 
 impl alumet::pipeline::Source for K8SProbe {
-    fn poll(
-        &mut self,
-        measurements: &mut MeasurementAccumulator,
-        timestamp: Timestamp,
-    ) -> Result<(), alumet::pipeline::PollError> {
+    fn poll(&mut self, measurements: &mut MeasurementAccumulator, timestamp: Timestamp) -> Result<(), PollError> {
         let mut file_buffer = String::new();
         let metrics: CgroupV2Metric = cgroup_v2::gather_value(&mut self.cgroup_v2_metric_file, &mut file_buffer)?;
         let diff_tot = match self.time_tot.update(metrics.time_used_tot) {
@@ -81,7 +78,7 @@ impl alumet::pipeline::Source for K8SProbe {
                 self.time_used_tot,
                 Resource::LocalMachine,
                 consumer.clone(),
-                value_tot as u64,
+                value_tot,
             )
             .with_attr("uid", AttributeValue::String(metrics.uid.clone()))
             .with_attr("name", AttributeValue::String(metrics.name.clone()))
@@ -95,7 +92,7 @@ impl alumet::pipeline::Source for K8SProbe {
                 self.time_used_user_mode,
                 Resource::LocalMachine,
                 consumer.clone(),
-                value_usr as u64,
+                value_usr,
             )
             .with_attr("uid", AttributeValue::String(metrics.uid.clone()))
             .with_attr("name", AttributeValue::String(metrics.name.clone()))
@@ -109,7 +106,7 @@ impl alumet::pipeline::Source for K8SProbe {
                 self.time_used_system_mode,
                 Resource::LocalMachine,
                 consumer.clone(),
-                value_sys as u64,
+                value_sys,
             )
             .with_attr("uid", AttributeValue::String(metrics.uid.clone()))
             .with_attr("name", AttributeValue::String(metrics.name.clone()))
@@ -123,7 +120,7 @@ impl alumet::pipeline::Source for K8SProbe {
 }
 
 impl Metrics {
-    pub fn new(alumet: &mut AlumetStart) -> Result<Self, MetricCreationError> {
+    pub fn new(alumet: &mut AlumetPluginStart) -> Result<Self, MetricCreationError> {
         let usec: PrefixedUnit = PrefixedUnit::micro(Unit::Second);
         Ok(Self {
             time_used_tot: alumet.create_metric::<u64>(

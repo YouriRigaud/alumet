@@ -8,9 +8,9 @@ use alumet::units::PrefixedUnit;
 use alumet::{
     measurement::{MeasurementAccumulator, MeasurementPoint},
     metrics::TypedMetricId,
-    pipeline::PollError,
+    pipeline::elements::error::PollError,
     plugin::util::{CounterDiff, CounterDiffUpdate},
-    plugin::AlumetStart,
+    plugin::AlumetPluginStart,
     resources::Resource,
     units::Unit,
 };
@@ -86,9 +86,8 @@ impl alumet::pipeline::Source for NvmlSource {
                 CounterDiffUpdate::Difference(diff) => Some(diff),
                 CounterDiffUpdate::CorrectedDifference(diff) => Some(diff),
             };
-            if let Some(diff) = diff {
-                // if meaningful (we need at least two measurements), convert to joules and push
-                let milli_joules = diff as u64;
+            if let Some(milli_joules) = diff {
+                // if meaningful (we need at least two measurements), push
                 measurements.push(MeasurementPoint::new(
                     timestamp,
                     self.metrics.total_energy_consumption,
@@ -216,7 +215,7 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(alumet: &mut AlumetStart) -> Result<Self, MetricCreationError> {
+    pub fn new(alumet: &mut AlumetPluginStart) -> Result<Self, MetricCreationError> {
         Ok(Self {
             total_energy_consumption: alumet.create_metric(
                 "nvml_energy_consumption",
@@ -453,7 +452,7 @@ impl NvmlDevices {
 }
 
 impl ManagedDevice {
-    pub fn as_wrapper<'a>(&'a self) -> Device<'a> {
+    pub fn as_wrapper(&self) -> Device<'_> {
         unsafe { Device::new(self.handle, &self.lib) }
     }
 }

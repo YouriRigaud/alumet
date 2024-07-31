@@ -1,9 +1,9 @@
 use alumet::{
-    pipeline::{runtime::ControlHandle, trigger::TriggerSpec},
+    pipeline::{control::ScopedControlHandle, trigger::TriggerSpec},
     plugin::{
         rust::{deserialize_config, serialize_config, AlumetPlugin},
         util::CounterDiff,
-        ConfigTable, Plugin,
+        AlumetPluginStart, AlumetPostStart, ConfigTable,
     },
 };
 use anyhow::Context;
@@ -55,24 +55,24 @@ impl AlumetPlugin for K8sPlugin {
     fn init(config: ConfigTable) -> anyhow::Result<Box<Self>> {
         let config = deserialize_config(config).context("invalid config")?;
         Ok(Box::new(K8sPlugin {
-            config: config,
+            config,
             watcher: None,
             metrics: None,
         }))
     }
 
-    fn start(&mut self, alumet: &mut alumet::plugin::AlumetStart) -> anyhow::Result<()> {
+    fn start(&mut self, alumet: &mut AlumetPluginStart) -> anyhow::Result<()> {
         let v2_used: bool = cgroup_v2::is_accessible_dir(&PathBuf::from("/sys/fs/cgroup/"));
         if !v2_used {
             anyhow::bail!("Cgroups v2 are not being used!");
         }
         self.metrics = Some(Metrics::new(alumet)?);
 
-        if self.config.hostname == "" {
+        if self.config.hostname.is_empty() {
             let hostname_ostring = gethostname();
             let hostname = hostname_ostring
                 .to_str()
-                .context("Invalid UTF-8 in Hostname")?
+                .with_context(|| format!("hostname {hostname_ostring:?} is not valid UTF-8"))?
                 .to_string();
             self.config.hostname = hostname;
         }
@@ -93,29 +93,27 @@ impl AlumetPlugin for K8sPlugin {
                 counter_tmp_tot,
                 counter_tmp_sys,
                 counter_tmp_usr,
-            )?;
+            );
             alumet.add_source(Box::new(probe), TriggerSpec::at_interval(self.config.poll_interval));
         }
 
-        return Ok(());
+        Ok(())
     }
 
     fn stop(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
 
-    fn post_pipeline_start(&mut self, pipeline: &mut alumet::pipeline::runtime::RunningPipeline) -> anyhow::Result<()> {
-        let control_handle = pipeline.control_handle();
-        let plugin_name = self.name().to_owned();
+    fn post_pipeline_start(&mut self, alumet: &mut AlumetPostStart) -> anyhow::Result<()> {
+        let control_handle = alumet.pipeline_control();
 
         let metrics: Metrics = self.metrics.clone().expect("Metrics is not available");
         let poll_interval = self.config.poll_interval;
         let kubernetes_api_url = self.config.kubernetes_api_url.clone();
         let hostname = self.config.hostname.to_owned();
         struct PodDetector {
-            plugin_name: String,
             metrics: Metrics,
-            control_handle: ControlHandle,
+            control_handle: ScopedControlHandle,
             poll_interval: Duration,
             kubernetes_api_url: String,
             hostname: String,
@@ -124,7 +122,7 @@ impl AlumetPlugin for K8sPlugin {
         impl EventHandler for PodDetector {
             fn handle_event(&mut self, event: Result<Event, notify::Error>) {
                 fn try_handle(
-                    pod_detect: &mut PodDetector,
+                    detector: &mut PodDetector,
                     event: Result<Event, notify::Error>,
                 ) -> Result<(), anyhow::Error> {
                     // The events look like the following
@@ -157,12 +155,12 @@ impl AlumetPlugin for K8sPlugin {
                                 let pod_uid = pod_uid.to_str().expect("Can't retrieve the pod uid value");
                                 // We open a File Descriptor to the newly created file
                                 let mut path_cpu = path.clone();
-                                let full_name_to_seek = pod_uid.strip_suffix(".slice").unwrap_or(&pod_uid);
+                                let full_name_to_seek = pod_uid.strip_suffix(".slice").unwrap_or(pod_uid);
                                 let parts: Vec<&str> = full_name_to_seek.split("pod").collect();
                                 let name_to_seek_raw = *(parts.last().unwrap_or(&full_name_to_seek));
                                 let uid_raw = parts.last().unwrap_or(&"No UID found");
                                 let uid = format!("pod{}", uid_raw);
-                                let name_to_seek = name_to_seek_raw.replace("_", "-");
+                                let name_to_seek = name_to_seek_raw.replace('_', "-");
                                 // let (name, ns) = cgroup_v2::get_pod_name(name_to_seek.to_owned());
                                 let rt = tokio::runtime::Builder::new_current_thread()
                                     .enable_all()
@@ -172,8 +170,8 @@ impl AlumetPlugin for K8sPlugin {
                                     .block_on(async {
                                         cgroup_v2::get_pod_name(
                                             name_to_seek.to_owned(),
-                                            pod_detect.hostname.clone(),
-                                            pod_detect.kubernetes_api_url.clone(),
+                                            detector.hostname.clone(),
+                                            detector.kubernetes_api_url.clone(),
                                         )
                                         .await
                                     })
@@ -186,7 +184,7 @@ impl AlumetPlugin for K8sPlugin {
                                 let metric_file = CgroupV2MetricFile {
                                     name: name.to_owned(),
                                     path: path_cpu,
-                                    file: file,
+                                    file,
                                     uid: uid.to_owned(),
                                     namespace: namespace.to_owned(),
                                     node: node.to_owned(),
@@ -196,21 +194,22 @@ impl AlumetPlugin for K8sPlugin {
                                 let counter_tmp_usr: CounterDiff = CounterDiff::with_max_value(CGROUP_MAX_TIME_COUNTER);
                                 let counter_tmp_sys: CounterDiff = CounterDiff::with_max_value(CGROUP_MAX_TIME_COUNTER);
                                 let probe: K8SProbe = K8SProbe::new(
-                                    pod_detect.metrics.clone(),
+                                    detector.metrics.clone(),
                                     metric_file,
                                     counter_tmp_tot,
                                     counter_tmp_sys,
                                     counter_tmp_usr,
-                                )
-                                .with_context(|| format!("Error creating a metric:"))?;
+                                );
 
                                 // Add the probe to the sources
-                                pod_detect.control_handle.add_source(
-                                    pod_detect.plugin_name.clone(),
-                                    pod_uid.to_string(),
-                                    Box::new(probe),
-                                    TriggerSpec::at_interval(pod_detect.poll_interval),
-                                );
+                                detector
+                                    .control_handle
+                                    .add_source(
+                                        pod_uid,
+                                        Box::new(probe),
+                                        TriggerSpec::at_interval(detector.poll_interval),
+                                    )
+                                    .with_context(|| format!("failed to add source for pod {pod_uid}"))?;
                             }
                         }
                         Ok(())
@@ -225,12 +224,11 @@ impl AlumetPlugin for K8sPlugin {
             }
         }
         let handler = PodDetector {
-            plugin_name: plugin_name,
-            metrics: metrics,
-            control_handle: control_handle,
-            poll_interval: poll_interval,
-            kubernetes_api_url: kubernetes_api_url,
-            hostname: hostname,
+            metrics,
+            control_handle,
+            poll_interval,
+            kubernetes_api_url,
+            hostname,
         };
 
         let mut watcher = notify::recommended_watcher(handler)?;
